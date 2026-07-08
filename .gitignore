@@ -1,0 +1,15 @@
+# build output
+/sew
+/sew.exe
+/dist/
+
+# local databases / scratch
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# ProjX local store (declared knowledge lives in the store, not tracked here)
+.projx/*.db
+.projx/*.json
+.projx/store-history.jsonl
