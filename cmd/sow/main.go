@@ -1,12 +1,12 @@
-// Command sew is a general-purpose SQLite migration runner.
+// Command sow is a general-purpose SQLite migration runner.
 //
-//	sew up     <db> <dir> [--dry-run]     apply all pending migrations
-//	sew down   <db> <dir> [--steps N]     roll back the last N applied (default 1)
-//	sew status <db> <dir>                 show applied / pending
-//	sew create <dir> <name>               scaffold a new timestamped migration file
-//	sew version
+//	sow up     <db> <dir> [--dry-run]     apply all pending migrations
+//	sow down   <db> <dir> [--steps N]     roll back the last N applied (default 1)
+//	sow status <db> <dir>                 show applied / pending
+//	sow create <dir> <name>               scaffold a new timestamped migration file
+//	sow version
 //
-// A migration is a .sql file with `-- +sew up` / `-- +sew down` sections. The file name
+// A migration is a .sql file with `-- +sow up` / `-- +sow down` sections. The file name
 // (without .sql) is its version and sort key; use a zero-padded or timestamp prefix.
 package main
 
@@ -18,7 +18,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/SirNiklas9/sew"
+	"github.com/SirNiklas9/sow"
 )
 
 func main() {
@@ -38,11 +38,11 @@ func main() {
 	case "create", "new":
 		cmdCreate(rest)
 	case "version", "--version", "-v":
-		fmt.Println("sew " + version)
+		fmt.Println("sow " + version)
 	case "help", "-h", "--help":
 		usage()
 	default:
-		fmt.Fprintf(os.Stderr, "sew: unknown command %q\n\n", cmd)
+		fmt.Fprintf(os.Stderr, "sow: unknown command %q\n\n", cmd)
 		usage()
 		os.Exit(2)
 	}
@@ -68,16 +68,16 @@ func takeFlag(args []string, name string) (val string, present bool, rest []stri
 	return "", false, args
 }
 
-func loadTarget(args []string) (*sew.DB, []sew.Migration, []string) {
+func loadTarget(args []string) (*sow.DB, []sow.Migration, []string) {
 	if len(args) < 2 {
 		die("need <db> <dir>")
 	}
 	dbPath, dir := args[0], args[1]
-	migs, err := sew.Load(dir)
+	migs, err := sow.Load(dir)
 	if err != nil {
 		die("%v", err)
 	}
-	db, err := sew.Open(dbPath)
+	db, err := sow.Open(dbPath)
 	if err != nil {
 		die("%v", err)
 	}
@@ -88,7 +88,7 @@ func cmdUp(args []string) {
 	_, dry, args := takeFlag(args, "dry-run")
 	db, migs, _ := loadTarget(args)
 	defer db.Close()
-	res, err := db.Up(migs, sew.Options{DryRun: dry, Logf: logf, Now: nowMilli})
+	res, err := db.Up(migs, sow.Options{DryRun: dry, Logf: logf, Now: nowMilli})
 	if err != nil {
 		die("%v", err)
 	}
@@ -110,7 +110,7 @@ func cmdDown(args []string) {
 	}
 	db, migs, _ := loadTarget(args)
 	defer db.Close()
-	res, err := db.Down(migs, steps, sew.Options{DryRun: dry, Logf: logf, Now: nowMilli})
+	res, err := db.Down(migs, steps, sow.Options{DryRun: dry, Logf: logf, Now: nowMilli})
 	if err != nil {
 		die("%v", err)
 	}
@@ -138,7 +138,7 @@ func cmdStatus(args []string) {
 
 func cmdCreate(args []string) {
 	if len(args) < 2 {
-		die("usage: sew create <dir> <name>")
+		die("usage: sow create <dir> <name>")
 	}
 	dir, name := args[0], sanitize(args[1])
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -149,7 +149,7 @@ func cmdCreate(args []string) {
 	if _, err := os.Stat(path); err == nil {
 		die("already exists: %s", path)
 	}
-	content := "-- +sew up\n\n\n-- +sew down\n\n"
+	content := "-- +sow up\n\n\n-- +sow down\n\n"
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		die("%v", err)
 	}
@@ -181,24 +181,24 @@ func suffix(dry bool) string {
 }
 
 func die(format string, a ...any) {
-	fmt.Fprintf(os.Stderr, "sew: "+format+"\n", a...)
+	fmt.Fprintf(os.Stderr, "sow: "+format+"\n", a...)
 	os.Exit(1)
 }
 
 func usage() {
-	fmt.Print(`sew — a small SQLite migration runner
+	fmt.Print(`sow — a small SQLite migration runner
 
 Usage:
-  sew up     <db> <dir> [--dry-run]     apply all pending migrations
-  sew down   <db> <dir> [--steps N]     roll back the last N applied (default 1)
-  sew status <db> <dir>                 show applied / pending
-  sew create <dir> <name>               scaffold a new timestamped migration file
-  sew version
+  sow up     <db> <dir> [--dry-run]     apply all pending migrations
+  sow down   <db> <dir> [--steps N]     roll back the last N applied (default 1)
+  sow status <db> <dir>                 show applied / pending
+  sow create <dir> <name>               scaffold a new timestamped migration file
+  sow version
 
 A migration is a .sql file with two sections:
-  -- +sew up
+  -- +sow up
   CREATE TABLE t (id INTEGER PRIMARY KEY);
-  -- +sew down
+  -- +sow down
   DROP TABLE t;
 
 The file name without .sql is the version and sort key (use 001_… or a timestamp).

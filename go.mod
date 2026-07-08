@@ -1,4 +1,4 @@
-module github.com/SirNiklas9/sew
+module github.com/SirNiklas9/sow
 
 go 1.25.0
 

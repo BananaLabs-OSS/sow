@@ -1,5 +1,5 @@
-// Command sew-cell is a Pulp cell (GOARCH=wasm) that runs sew migrations against the
-// host's storage.sqlite capability. It is the "migrator cell": the brain is pure sew
+// Command sow-cell is a Pulp cell (GOARCH=wasm) that runs sow migrations against the
+// host's storage.sqlite capability. It is the "migrator cell": the brain is pure sow
 // logic; the SQLite is the host's. Drop it into a Pulp host alongside other cells and it
 // brings the database up to schema on init — no driver in the cell, migrations embedded.
 //
@@ -16,14 +16,14 @@ import (
 	"embed"
 
 	"github.com/BananaLabs-OSS/Fiber/pulp"
-	"github.com/SirNiklas9/sew"
+	"github.com/SirNiklas9/sow"
 )
 
 //go:embed migrations/*.sql
 var migrations embed.FS
 
-// pulpConn adapts the host's storage.sqlite capability to sew.Conn. It is not a TxConn —
-// the host seam exposes exec/query only — so sew drives it best-effort, which is exactly
+// pulpConn adapts the host's storage.sqlite capability to sow.Conn. It is not a TxConn —
+// the host seam exposes exec/query only — so sow drives it best-effort, which is exactly
 // how a schema migration over a bare capability should run.
 type pulpConn struct{}
 
@@ -42,22 +42,22 @@ func (pulpConn) Query(query string, args ...any) ([][]any, error) {
 
 func init() {
 	pulp.OnInit(func(_ []byte) error {
-		db, err := sew.New(pulpConn{})
+		db, err := sow.New(pulpConn{})
 		if err != nil {
-			return fmt.Errorf("sew: init: %w", err)
+			return fmt.Errorf("sow: init: %w", err)
 		}
-		migs, err := sew.LoadFS(migrations, "migrations")
+		migs, err := sow.LoadFS(migrations, "migrations")
 		if err != nil {
-			return fmt.Errorf("sew: load embedded migrations: %w", err)
+			return fmt.Errorf("sow: load embedded migrations: %w", err)
 		}
-		res, err := db.Up(migs, sew.Options{
-			Logf: func(format string, a ...any) { fmt.Printf("[sew-cell] "+format+"\n", a...) },
+		res, err := db.Up(migs, sow.Options{
+			Logf: func(format string, a ...any) { fmt.Printf("[sow-cell] "+format+"\n", a...) },
 		})
 		if err != nil {
-			return fmt.Errorf("sew: migrate: %w", err)
+			return fmt.Errorf("sow: migrate: %w", err)
 		}
 		applied, _ := db.AppliedVersions()
-		fmt.Printf("[sew-cell] migrated: +%d this run, %d total applied\n", len(res.Applied), len(applied))
+		fmt.Printf("[sow-cell] migrated: +%d this run, %d total applied\n", len(res.Applied), len(applied))
 		return nil
 	})
 

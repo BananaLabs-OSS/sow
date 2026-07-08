@@ -1,21 +1,21 @@
-# sew
+# sow
 
 A small, general-purpose **SQLite migration runner** — a library and a CLI. Point it at
 any SQLite database and a directory of `.sql` migration files; it applies the pending
 ones in order, once, inside a transaction, and records what it applied so re-running is a
 no-op. Rollbacks run each migration's `down` section. No ORM, no codegen, no framework.
 
-Read migrations, apply them, sew it up.
+Read migrations, apply them, sow it up.
 
 ## Migration files
 
 A migration is a plain `.sql` file with two sections:
 
 ```sql
--- +sew up
+-- +sow up
 CREATE TABLE widgets (id INTEGER PRIMARY KEY, name TEXT);
 
--- +sew down
+-- +sow down
 DROP TABLE widgets;
 ```
 
@@ -35,52 +35,52 @@ top-level `;` (quotes and `--` / `/* */` comments are respected).
 ## CLI
 
 ```
-sew up     <db> <dir> [--dry-run]     apply all pending migrations
-sew down   <db> <dir> [--steps N]     roll back the last N applied (default 1)
-sew status <db> <dir>                 show applied / pending
-sew create <dir> <name>               scaffold a new timestamped migration file
-sew version
+sow up     <db> <dir> [--dry-run]     apply all pending migrations
+sow down   <db> <dir> [--steps N]     roll back the last N applied (default 1)
+sow status <db> <dir>                 show applied / pending
+sow create <dir> <name>               scaffold a new timestamped migration file
+sow version
 ```
 
 Example:
 
 ```sh
-sew create ./migrations "create users"   # writes ./migrations/<ts>_create_users.sql
+sow create ./migrations "create users"   # writes ./migrations/<ts>_create_users.sql
 # ...edit the file...
-sew status ./app.db ./migrations
-sew up     ./app.db ./migrations
-sew down   ./app.db ./migrations --steps 1
+sow status ./app.db ./migrations
+sow up     ./app.db ./migrations
+sow down   ./app.db ./migrations --steps 1
 ```
 
 Install:
 
 ```sh
-go install github.com/SirNiklas9/sew/cmd/sew@latest
+go install github.com/SirNiklas9/sow/cmd/sow@latest
 ```
 
 ## Library
 
 ```go
-import "github.com/SirNiklas9/sew"
+import "github.com/SirNiklas9/sow"
 
-migs, _ := sew.Load("./migrations")
-db, _   := sew.Open("./app.db")
+migs, _ := sow.Load("./migrations")
+db, _   := sow.Open("./app.db")
 defer db.Close()
 
-res, err := db.Up(migs, sew.Options{Logf: log.Printf})
+res, err := db.Up(migs, sow.Options{Logf: log.Printf})
 // db.Down(migs, 1, opt) · db.Status(migs) · db.Pending(migs) · db.AppliedVersions()
 ```
 
-Applied versions are tracked in a `sew_migrations` table created automatically. Each
+Applied versions are tracked in a `sow_migrations` table created automatically. Each
 migration runs in its own transaction together with its ledger write, so a failure leaves
 earlier migrations committed and the failing one fully rolled back.
 
 ## How it works
 
 - **Pure Go** — uses `modernc.org/sqlite` (no CGo).
-- **Idempotent** — a version already in `sew_migrations` is skipped.
+- **Idempotent** — a version already in `sow_migrations` is skipped.
 - **Ordered** — migrations apply in version (filename) order; duplicate versions are an error.
-- **Reversible** — `down` sections enable `sew down`; a migration with no `down` refuses to roll back.
+- **Reversible** — `down` sections enable `sow down`; a migration with no `down` refuses to roll back.
 
 ## Limitations
 

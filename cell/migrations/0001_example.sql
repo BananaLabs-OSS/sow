@@ -1,10 +1,10 @@
--- +sew up
-CREATE TABLE IF NOT EXISTS sew_cell_demo (
+-- +sow up
+CREATE TABLE IF NOT EXISTS sow_cell_demo (
 	id         INTEGER PRIMARY KEY,
 	note       TEXT NOT NULL,
 	created_at INTEGER NOT NULL DEFAULT 0
 );
-INSERT INTO sew_cell_demo (id, note) VALUES (1, 'migrated by the sew cell');
+INSERT INTO sow_cell_demo (id, note) VALUES (1, 'migrated by the sow cell');
 
--- +sew down
-DROP TABLE sew_cell_demo;
+-- +sow down
+DROP TABLE sow_cell_demo;

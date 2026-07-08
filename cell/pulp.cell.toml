@@ -1,5 +1,5 @@
 schema_version = 1
-name    = "sew"
+name    = "sow"
 version = "0.1.0"
 wasm    = "cell.wasm"
 capabilities = ["storage.sqlite"]

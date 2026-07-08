@@ -1,8 +1,8 @@
-// Package sew is a small, general-purpose SQLite migration runner: point it at any
+// Package sow is a small, general-purpose SQLite migration runner: point it at any
 // SQLite database and a directory of `.sql` migration files, and it applies the
 // pending ones in order, once, recording what it applied so re-running is a no-op.
 // Rollbacks run each migration's `down` section. No ORM, no codegen, no framework —
-// read migrations, apply them, sew it up.
+// read migrations, apply them, sow it up.
 //
 // The core owns NO SQLite driver: it runs over an injected Conn (see Conn/TxConn), so it
 // compiles to wasm and can run as a Pulp cell that gets SQLite from the host capability,
@@ -11,14 +11,14 @@
 //
 // A migration file is plain SQL with two sections:
 //
-//	-- +sew up
+//	-- +sow up
 //	CREATE TABLE widgets (id INTEGER PRIMARY KEY, name TEXT);
 //
-//	-- +sew down
+//	-- +sow down
 //	DROP TABLE widgets;
 //
 // The file name (without .sql) is its VERSION and sort key: 001_init.sql, 20260708_x.sql.
-package sew
+package sow
 
 import (
 	"fmt"
@@ -28,7 +28,7 @@ import (
 	"strings"
 )
 
-// Conn is the minimal SQLite capability sew runs over. Inject a native (modernc) conn via
+// Conn is the minimal SQLite capability sow runs over. Inject a native (modernc) conn via
 // Open, or a Pulp host-backed conn in a cell — the core imports no driver, so it builds to
 // wasm. Query returns rows as [][]any (one []any per row), matching the host wire shape.
 type Conn interface {
@@ -55,7 +55,7 @@ type Migration struct {
 }
 
 // ledgerDDL records which versions have been applied. Created on first use.
-const ledgerDDL = `CREATE TABLE IF NOT EXISTS sew_migrations (
+const ledgerDDL = `CREATE TABLE IF NOT EXISTS sow_migrations (
 	version    TEXT PRIMARY KEY,
 	name       TEXT NOT NULL DEFAULT '',
 	applied_at INTEGER NOT NULL DEFAULT 0
@@ -87,14 +87,14 @@ type Result struct {
 	Rolled  []Migration // migrations whose Down ran
 }
 
-// DB is a migration target: any Conn with the sew ledger ensured.
+// DB is a migration target: any Conn with the sow ledger ensured.
 type DB struct{ conn Conn }
 
 // New wraps an injected Conn (native, host-backed, or a test fake) and ensures the ledger
 // table exists. This is the driver-agnostic constructor; Open is the native convenience.
 func New(conn Conn) (*DB, error) {
 	if err := conn.Exec(ledgerDDL); err != nil {
-		return nil, fmt.Errorf("sew: init ledger: %w", err)
+		return nil, fmt.Errorf("sow: init ledger: %w", err)
 	}
 	return &DB{conn: conn}, nil
 }
@@ -117,17 +117,17 @@ func (d *DB) atomically(fn func(Conn) error) error {
 }
 
 // MarkApplied records a version as already applied WITHOUT running it — the hook a caller
-// uses to adopt sew over a database migrated by an older mechanism (seed the ledger from a
+// uses to adopt sow over a database migrated by an older mechanism (seed the ledger from a
 // prior version counter so those steps don't re-run). Idempotent.
 func (d *DB) MarkApplied(version, name string, at int64) error {
 	return d.conn.Exec(
-		`INSERT OR IGNORE INTO sew_migrations (version, name, applied_at) VALUES (?, ?, ?)`,
+		`INSERT OR IGNORE INTO sow_migrations (version, name, applied_at) VALUES (?, ?, ?)`,
 		version, name, at)
 }
 
 // AppliedVersions returns the applied versions in application order.
 func (d *DB) AppliedVersions() ([]string, error) {
-	rows, err := d.conn.Query(`SELECT version FROM sew_migrations ORDER BY applied_at ASC, version ASC`)
+	rows, err := d.conn.Query(`SELECT version FROM sow_migrations ORDER BY applied_at ASC, version ASC`)
 	if err != nil {
 		return nil, err
 	}
@@ -204,10 +204,10 @@ func (d *DB) Up(ms []Migration, opt Options) (Result, error) {
 			if err := execAll(c, m.Up); err != nil {
 				return err
 			}
-			return c.Exec(`INSERT INTO sew_migrations (version, name, applied_at) VALUES (?, ?, ?)`,
+			return c.Exec(`INSERT INTO sow_migrations (version, name, applied_at) VALUES (?, ?, ?)`,
 				m.Version, m.Name, opt.now())
 		}); err != nil {
-			return res, fmt.Errorf("sew: up %s (%s): %w", m.Version, m.Path, err)
+			return res, fmt.Errorf("sow: up %s (%s): %w", m.Version, m.Path, err)
 		}
 		res.Applied = append(res.Applied, m)
 	}
@@ -233,10 +233,10 @@ func (d *DB) Down(ms []Migration, n int, opt Options) (Result, error) {
 		v := appliedOrder[i]
 		m, ok := byVersion[v]
 		if !ok {
-			return res, fmt.Errorf("sew: cannot roll back %s — its migration file is missing", v)
+			return res, fmt.Errorf("sow: cannot roll back %s — its migration file is missing", v)
 		}
 		if strings.TrimSpace(m.Down) == "" {
-			return res, fmt.Errorf("sew: cannot roll back %s — no `-- +sew down` section", v)
+			return res, fmt.Errorf("sow: cannot roll back %s — no `-- +sow down` section", v)
 		}
 		opt.log("down %s — %s%s", m.Version, m.Name, dry(opt.DryRun))
 		if opt.DryRun {
@@ -247,9 +247,9 @@ func (d *DB) Down(ms []Migration, n int, opt Options) (Result, error) {
 			if err := execAll(c, m.Down); err != nil {
 				return err
 			}
-			return c.Exec(`DELETE FROM sew_migrations WHERE version = ?`, v)
+			return c.Exec(`DELETE FROM sow_migrations WHERE version = ?`, v)
 		}); err != nil {
-			return res, fmt.Errorf("sew: down %s (%s): %w", m.Version, m.Path, err)
+			return res, fmt.Errorf("sow: down %s (%s): %w", m.Version, m.Path, err)
 		}
 		res.Rolled = append(res.Rolled, m)
 	}
@@ -290,7 +290,7 @@ func Load(dir string) ([]Migration, error) {
 	for _, p := range paths {
 		data, err := os.ReadFile(p)
 		if err != nil {
-			return nil, fmt.Errorf("sew: read %q: %w", p, err)
+			return nil, fmt.Errorf("sow: read %q: %w", p, err)
 		}
 		m := Parse(filepath.Base(p), string(data))
 		m.Path = p
@@ -299,7 +299,7 @@ func Load(dir string) ([]Migration, error) {
 	sort.Slice(out, func(i, j int) bool { return out[i].Version < out[j].Version })
 	for i := 1; i < len(out); i++ {
 		if out[i].Version == out[i-1].Version {
-			return nil, fmt.Errorf("sew: duplicate migration version %q (%s and %s)",
+			return nil, fmt.Errorf("sow: duplicate migration version %q (%s and %s)",
 				out[i].Version, out[i-1].Path, out[i].Path)
 		}
 	}
@@ -317,16 +317,16 @@ func Parse(fileName, content string) Migration {
 	return Migration{Version: version, Name: name, Up: strings.TrimSpace(up), Down: strings.TrimSpace(down)}
 }
 
-// splitSections divides content into up/down bodies by the sew markers.
+// splitSections divides content into up/down bodies by the sow markers.
 func splitSections(content string) (up, down string) {
 	var ub, db strings.Builder
 	cur := &ub
 	for _, line := range strings.Split(content, "\n") {
 		switch markerDirective(line) {
-		case "+sew up":
+		case "+sow up":
 			cur = &ub
 			continue
-		case "+sew down":
+		case "+sow down":
 			cur = &db
 			continue
 		}
@@ -343,7 +343,7 @@ func markerDirective(line string) string {
 	}
 	t = strings.ToLower(strings.TrimSpace(strings.TrimPrefix(t, "--")))
 	switch t {
-	case "+sew up", "+sew down":
+	case "+sow up", "+sow down":
 		return t
 	}
 	return ""

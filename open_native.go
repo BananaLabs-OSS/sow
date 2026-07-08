@@ -1,6 +1,6 @@
 //go:build !wasm
 
-package sew
+package sow
 
 import (
 	"database/sql"
@@ -11,14 +11,14 @@ import (
 
 // open_native.go is the NATIVE adapter: a modernc-backed Conn for a plain Go binary
 // (the CLI, tests, any non-wasm caller). It is excluded from wasm builds — there a cell
-// injects a host-backed Conn via New() instead, so the sew core carries no SQLite engine.
+// injects a host-backed Conn via New() instead, so the sow core carries no SQLite engine.
 
 // Open opens (or creates) a SQLite database at path (":memory:" allowed) and returns a DB
 // with the ledger ensured, backed by modernc over database/sql.
 func Open(path string) (*DB, error) {
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
-		return nil, fmt.Errorf("sew: open %q: %w", path, err)
+		return nil, fmt.Errorf("sow: open %q: %w", path, err)
 	}
 	db.SetMaxOpenConns(1) // one connection keeps :memory: coherent and cross-call tx valid
 	d, err := New(&sqliteConn{db: db})

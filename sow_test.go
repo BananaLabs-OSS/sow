@@ -1,4 +1,4 @@
-package sew
+package sow
 
 import (
 	"os"
@@ -51,7 +51,7 @@ func tableExists(t *testing.T, d *DB, name string) bool {
 }
 
 func TestParseSections(t *testing.T) {
-	m := Parse("001_create_widgets.sql", "-- +sew up\nCREATE TABLE w(id);\n-- +sew down\nDROP TABLE w;\n")
+	m := Parse("001_create_widgets.sql", "-- +sow up\nCREATE TABLE w(id);\n-- +sow down\nDROP TABLE w;\n")
 	if m.Version != "001_create_widgets" {
 		t.Errorf("version = %q", m.Version)
 	}
@@ -71,8 +71,8 @@ func TestParseSections(t *testing.T) {
 
 func TestUpIdempotentAndDown(t *testing.T) {
 	dir := t.TempDir()
-	writeFile(t, dir, "001_widgets.sql", "-- +sew up\nCREATE TABLE widgets(id INTEGER PRIMARY KEY);\n-- +sew down\nDROP TABLE widgets;\n")
-	writeFile(t, dir, "002_gadgets.sql", "-- +sew up\nCREATE TABLE gadgets(id INTEGER);\nINSERT INTO gadgets VALUES (1);\n-- +sew down\nDROP TABLE gadgets;\n")
+	writeFile(t, dir, "001_widgets.sql", "-- +sow up\nCREATE TABLE widgets(id INTEGER PRIMARY KEY);\n-- +sow down\nDROP TABLE widgets;\n")
+	writeFile(t, dir, "002_gadgets.sql", "-- +sow up\nCREATE TABLE gadgets(id INTEGER);\nINSERT INTO gadgets VALUES (1);\n-- +sow down\nDROP TABLE gadgets;\n")
 
 	migs, err := Load(dir)
 	if err != nil {
@@ -131,7 +131,7 @@ func TestUpIdempotentAndDown(t *testing.T) {
 	}
 }
 
-// plainConn wraps a Conn but hides RunTx, so sew drives it best-effort — the path a
+// plainConn wraps a Conn but hides RunTx, so sow drives it best-effort — the path a
 // Pulp host-backed connection (no cross-call transactions) takes.
 type plainConn struct{ c Conn }
 
@@ -142,7 +142,7 @@ func (p plainConn) Query(q string, a ...any) ([][]any, error) { return p.c.Query
 // TxConn — i.e. the driver-agnostic path a wasm cell uses.
 func TestInjectedConnBestEffort(t *testing.T) {
 	dir := t.TempDir()
-	writeFile(t, dir, "001_x.sql", "-- +sew up\nCREATE TABLE x(id INTEGER);\nINSERT INTO x VALUES (7);\n")
+	writeFile(t, dir, "001_x.sql", "-- +sow up\nCREATE TABLE x(id INTEGER);\nINSERT INTO x VALUES (7);\n")
 	migs, _ := Load(dir)
 
 	native, err := Open(filepath.Join(dir, "inj.db"))
@@ -169,7 +169,7 @@ func TestInjectedConnBestEffort(t *testing.T) {
 
 func TestDryRunWritesNothing(t *testing.T) {
 	dir := t.TempDir()
-	writeFile(t, dir, "001_x.sql", "-- +sew up\nCREATE TABLE x(id);\n")
+	writeFile(t, dir, "001_x.sql", "-- +sow up\nCREATE TABLE x(id);\n")
 	migs, _ := Load(dir)
 	db, _ := Open(filepath.Join(dir, "d.db"))
 	defer db.Close()
@@ -197,7 +197,7 @@ func TestSplitStatementsRespectsQuotesAndComments(t *testing.T) {
 
 func TestIrreversibleDownErrors(t *testing.T) {
 	dir := t.TempDir()
-	writeFile(t, dir, "001_noback.sql", "-- +sew up\nCREATE TABLE z(id);\n") // no down
+	writeFile(t, dir, "001_noback.sql", "-- +sow up\nCREATE TABLE z(id);\n") // no down
 	migs, _ := Load(dir)
 	db, _ := Open(filepath.Join(dir, "n.db"))
 	defer db.Close()

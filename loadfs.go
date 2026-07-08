@@ -1,4 +1,4 @@
-package sew
+package sow
 
 import (
 	"fmt"
@@ -24,7 +24,7 @@ func LoadFS(fsys fs.FS, dir string) ([]Migration, error) {
 	for _, p := range matches {
 		data, err := fs.ReadFile(fsys, p)
 		if err != nil {
-			return nil, fmt.Errorf("sew: read %q: %w", p, err)
+			return nil, fmt.Errorf("sow: read %q: %w", p, err)
 		}
 		m := Parse(path.Base(p), string(data))
 		m.Path = p
@@ -33,7 +33,7 @@ func LoadFS(fsys fs.FS, dir string) ([]Migration, error) {
 	sort.Slice(out, func(i, j int) bool { return out[i].Version < out[j].Version })
 	for i := 1; i < len(out); i++ {
 		if out[i].Version == out[i-1].Version {
-			return nil, fmt.Errorf("sew: duplicate migration version %q (%s and %s)",
+			return nil, fmt.Errorf("sow: duplicate migration version %q (%s and %s)",
 				out[i].Version, out[i-1].Path, out[i].Path)
 		}
 	}
