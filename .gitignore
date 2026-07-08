@@ -13,3 +13,6 @@
 .projx/*.db
 .projx/*.json
 .projx/store-history.jsonl
+
+# built cells (wasm build artifacts)
+*.wasm
