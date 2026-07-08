@@ -1,6 +1,6 @@
 # build output
-/sew
-/sew.exe
+/sow
+/sow.exe
 /dist/
 
 # local databases / scratch
@@ -17,3 +17,8 @@
 # built cells (wasm build artifacts)
 *.wasm
 pulp.ctl
+
+# editor / agent tooling (dev-local, not part of the library)
+.claude/
+.codegraph/
+.mcp.json

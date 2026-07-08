@@ -87,3 +87,9 @@ earlier migrations committed and the failing one fully rolled back.
 - SQLite only.
 - Statement splitting is on top-level `;`. A body containing an inner `;` (e.g. a trigger
   with `BEGIN … ; … ; END`) should be authored so that block is the file's only statement.
+
+---
+
+## License
+
+[MIT](LICENSE) © 2026 SirNiklas9.
