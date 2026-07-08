@@ -1,8 +1,13 @@
 // Package sew is a small, general-purpose SQLite migration runner: point it at any
 // SQLite database and a directory of `.sql` migration files, and it applies the
-// pending ones in order, once, inside a transaction, recording what it applied so
-// re-running is a no-op. Rollbacks run each migration's `down` section. No ORM, no
-// codegen, no framework — read migrations, apply them, sew it up.
+// pending ones in order, once, recording what it applied so re-running is a no-op.
+// Rollbacks run each migration's `down` section. No ORM, no codegen, no framework —
+// read migrations, apply them, sew it up.
+//
+// The core owns NO SQLite driver: it runs over an injected Conn (see Conn/TxConn), so it
+// compiles to wasm and can run as a Pulp cell that gets SQLite from the host capability,
+// exactly like a native binary gets it from modernc. Use Open (native, CLI) to get a
+// modernc-backed DB, or New(conn) to inject any Conn — e.g. a host-backed one in a cell.
 //
 // A migration file is plain SQL with two sections:
 //
@@ -12,21 +17,33 @@
 //	-- +sew down
 //	DROP TABLE widgets;
 //
-// The file's name (without .sql) is its VERSION and its sort key, so a zero-padded
-// or timestamped prefix keeps order deterministic: 001_init.sql, 20260708_add_col.sql.
-// A file with no markers is treated as all-up (no rollback).
+// The file name (without .sql) is its VERSION and sort key: 001_init.sql, 20260708_x.sql.
 package sew
 
 import (
-	"database/sql"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
-
-	_ "modernc.org/sqlite" // pure-Go SQLite driver, registered as "sqlite" (no CGo)
 )
+
+// Conn is the minimal SQLite capability sew runs over. Inject a native (modernc) conn via
+// Open, or a Pulp host-backed conn in a cell — the core imports no driver, so it builds to
+// wasm. Query returns rows as [][]any (one []any per row), matching the host wire shape.
+type Conn interface {
+	Exec(query string, args ...any) error
+	Query(query string, args ...any) ([][]any, error)
+}
+
+// TxConn is a Conn that can run a unit of work atomically. Backends that support
+// transactions (the native modernc adapter) implement it, so each migration is
+// all-or-nothing; a backend that doesn't (a bare host capability) is driven best-effort
+// — statements then ledger, no rollback — which is how a seam-only store already migrates.
+type TxConn interface {
+	Conn
+	RunTx(fn func(Conn) error) error
+}
 
 // Migration is one versioned step: its Up SQL, optional Down SQL, and identity.
 type Migration struct {
@@ -37,8 +54,7 @@ type Migration struct {
 	Path    string // source file, for error messages ("" for in-memory)
 }
 
-// ledgerDDL records which versions have been applied. Created on first use, so a
-// fresh database needs no bootstrap step.
+// ledgerDDL records which versions have been applied. Created on first use.
 const ledgerDDL = `CREATE TABLE IF NOT EXISTS sew_migrations (
 	version    TEXT PRIMARY KEY,
 	name       TEXT NOT NULL DEFAULT '',
@@ -47,7 +63,7 @@ const ledgerDDL = `CREATE TABLE IF NOT EXISTS sew_migrations (
 
 // Options tune an Up/Down run.
 type Options struct {
-	DryRun bool                          // plan only — open no transaction, write nothing
+	DryRun bool                          // plan only — writes nothing
 	Logf   func(format string, a ...any) // progress sink (nil = silent)
 	Now    func() int64                  // applied_at clock (nil = 0); injectable for tests
 }
@@ -67,46 +83,61 @@ func (o Options) now() int64 {
 
 // Result summarizes what a run did.
 type Result struct {
-	Applied []Migration // migrations whose Up ran (Up direction)
-	Rolled  []Migration // migrations whose Down ran (Down direction)
+	Applied []Migration // migrations whose Up ran
+	Rolled  []Migration // migrations whose Down ran
 }
 
-// DB is an open SQLite database with the sew ledger ensured.
-type DB struct{ sql *sql.DB }
+// DB is a migration target: any Conn with the sew ledger ensured.
+type DB struct{ conn Conn }
 
-// Open opens (or creates) a SQLite database at path (":memory:" allowed) and ensures
-// the ledger table exists.
-func Open(path string) (*DB, error) {
-	db, err := sql.Open("sqlite", path)
-	if err != nil {
-		return nil, fmt.Errorf("sew: open %q: %w", path, err)
-	}
-	if _, err := db.Exec(ledgerDDL); err != nil {
-		_ = db.Close()
+// New wraps an injected Conn (native, host-backed, or a test fake) and ensures the ledger
+// table exists. This is the driver-agnostic constructor; Open is the native convenience.
+func New(conn Conn) (*DB, error) {
+	if err := conn.Exec(ledgerDDL); err != nil {
 		return nil, fmt.Errorf("sew: init ledger: %w", err)
 	}
-	return &DB{sql: db}, nil
+	return &DB{conn: conn}, nil
 }
 
-// Close releases the database.
-func (d *DB) Close() error { return d.sql.Close() }
+// Close closes the underlying Conn if it is a Closer (the native adapter is); a
+// host-backed Conn the caller owns is left untouched.
+func (d *DB) Close() error {
+	if c, ok := d.conn.(interface{ Close() error }); ok {
+		return c.Close()
+	}
+	return nil
+}
+
+// atomically runs fn in a transaction when the Conn supports one, else best-effort.
+func (d *DB) atomically(fn func(Conn) error) error {
+	if tx, ok := d.conn.(TxConn); ok {
+		return tx.RunTx(fn)
+	}
+	return fn(d.conn)
+}
+
+// MarkApplied records a version as already applied WITHOUT running it — the hook a caller
+// uses to adopt sew over a database migrated by an older mechanism (seed the ledger from a
+// prior version counter so those steps don't re-run). Idempotent.
+func (d *DB) MarkApplied(version, name string, at int64) error {
+	return d.conn.Exec(
+		`INSERT OR IGNORE INTO sew_migrations (version, name, applied_at) VALUES (?, ?, ?)`,
+		version, name, at)
+}
 
 // AppliedVersions returns the applied versions in application order.
 func (d *DB) AppliedVersions() ([]string, error) {
-	rows, err := d.sql.Query(`SELECT version FROM sew_migrations ORDER BY applied_at ASC, version ASC`)
+	rows, err := d.conn.Query(`SELECT version FROM sew_migrations ORDER BY applied_at ASC, version ASC`)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []string
-	for rows.Next() {
-		var v string
-		if err := rows.Scan(&v); err != nil {
-			return nil, err
+	out := make([]string, 0, len(rows))
+	for _, r := range rows {
+		if len(r) > 0 {
+			out = append(out, toString(r[0]))
 		}
-		out = append(out, v)
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func (d *DB) appliedSet() (map[string]bool, error) {
@@ -155,9 +186,8 @@ func (d *DB) Pending(ms []Migration) ([]Migration, error) {
 	return out, nil
 }
 
-// Up applies every pending migration in order. Each runs in its own transaction with
-// its ledger insert, so a failure leaves earlier migrations committed and the failing
-// one fully rolled back. DryRun reports the plan and changes nothing.
+// Up applies every pending migration in order. Each runs atomically when the Conn is a
+// TxConn (native), together with its ledger insert. DryRun reports the plan, changes nothing.
 func (d *DB) Up(ms []Migration, opt Options) (Result, error) {
 	pending, err := d.Pending(ms)
 	if err != nil {
@@ -170,10 +200,12 @@ func (d *DB) Up(ms []Migration, opt Options) (Result, error) {
 			res.Applied = append(res.Applied, m)
 			continue
 		}
-		if err := d.runTx(m.Up, func(tx *sql.Tx) error {
-			_, e := tx.Exec(`INSERT INTO sew_migrations (version, name, applied_at) VALUES (?, ?, ?)`,
+		if err := d.atomically(func(c Conn) error {
+			if err := execAll(c, m.Up); err != nil {
+				return err
+			}
+			return c.Exec(`INSERT INTO sew_migrations (version, name, applied_at) VALUES (?, ?, ?)`,
 				m.Version, m.Name, opt.now())
-			return e
 		}); err != nil {
 			return res, fmt.Errorf("sew: up %s (%s): %w", m.Version, m.Path, err)
 		}
@@ -182,8 +214,8 @@ func (d *DB) Up(ms []Migration, opt Options) (Result, error) {
 	return res, nil
 }
 
-// Down rolls back the last n applied migrations (n<=0 means 1), newest first, running
-// each Down section. A migration with no Down section is an error (irreversible).
+// Down rolls back the last n applied migrations (n<=0 means 1), newest first. A migration
+// with no Down section is an error (irreversible).
 func (d *DB) Down(ms []Migration, n int, opt Options) (Result, error) {
 	if n <= 0 {
 		n = 1
@@ -197,7 +229,6 @@ func (d *DB) Down(ms []Migration, n int, opt Options) (Result, error) {
 		return Result{}, err
 	}
 	var res Result
-	// newest first
 	for i := len(appliedOrder) - 1; i >= 0 && len(res.Rolled) < n; i-- {
 		v := appliedOrder[i]
 		m, ok := byVersion[v]
@@ -212,9 +243,11 @@ func (d *DB) Down(ms []Migration, n int, opt Options) (Result, error) {
 			res.Rolled = append(res.Rolled, m)
 			continue
 		}
-		if err := d.runTx(m.Down, func(tx *sql.Tx) error {
-			_, e := tx.Exec(`DELETE FROM sew_migrations WHERE version = ?`, v)
-			return e
+		if err := d.atomically(func(c Conn) error {
+			if err := execAll(c, m.Down); err != nil {
+				return err
+			}
+			return c.Exec(`DELETE FROM sew_migrations WHERE version = ?`, v)
 		}); err != nil {
 			return res, fmt.Errorf("sew: down %s (%s): %w", m.Version, m.Path, err)
 		}
@@ -223,23 +256,28 @@ func (d *DB) Down(ms []Migration, n int, opt Options) (Result, error) {
 	return res, nil
 }
 
-// runTx runs a migration body plus a ledger mutation atomically.
-func (d *DB) runTx(body string, ledger func(*sql.Tx) error) error {
-	tx, err := d.sql.Begin()
-	if err != nil {
-		return err
-	}
+// execAll runs each statement in a migration body over c.
+func execAll(c Conn, body string) error {
 	for _, stmt := range splitStatements(body) {
-		if _, err := tx.Exec(stmt); err != nil {
-			_ = tx.Rollback()
+		if err := c.Exec(stmt); err != nil {
 			return fmt.Errorf("statement %q: %w", firstWords(stmt), err)
 		}
 	}
-	if err := ledger(tx); err != nil {
-		_ = tx.Rollback()
-		return err
+	return nil
+}
+
+// toString coerces a scanned cell (string or []byte, depending on the backend) to string.
+func toString(v any) string {
+	switch t := v.(type) {
+	case string:
+		return t
+	case []byte:
+		return string(t)
+	case nil:
+		return ""
+	default:
+		return fmt.Sprintf("%v", t)
 	}
-	return tx.Commit()
 }
 
 // Load reads every *.sql file in dir, parses it, and returns them sorted by version.
@@ -259,7 +297,6 @@ func Load(dir string) ([]Migration, error) {
 		out = append(out, m)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Version < out[j].Version })
-	// Reject duplicate versions — an ambiguous order is a bug, not a warning.
 	for i := 1; i < len(out); i++ {
 		if out[i].Version == out[i-1].Version {
 			return nil, fmt.Errorf("sew: duplicate migration version %q (%s and %s)",
@@ -269,9 +306,7 @@ func Load(dir string) ([]Migration, error) {
 	return out, nil
 }
 
-// Parse turns a file name + contents into a Migration. The version is the name without
-// its .sql suffix; the human Name is the part after a leading "<token>_" prefix. Content
-// is split on the `-- +sew up` / `-- +sew down` markers; a file with no markers is all-up.
+// Parse turns a file name + contents into a Migration.
 func Parse(fileName, content string) Migration {
 	version := strings.TrimSuffix(fileName, ".sql")
 	name := version
@@ -282,12 +317,10 @@ func Parse(fileName, content string) Migration {
 	return Migration{Version: version, Name: name, Up: strings.TrimSpace(up), Down: strings.TrimSpace(down)}
 }
 
-// splitSections divides content into the up and down bodies by the sew markers. Marker
-// detection is line-based and case-insensitive on the directive; text before any marker
-// is treated as up (so an unmarked file just works).
+// splitSections divides content into up/down bodies by the sew markers.
 func splitSections(content string) (up, down string) {
 	var ub, db strings.Builder
-	cur := &ub // default: everything is "up" until a marker says otherwise
+	cur := &ub
 	for _, line := range strings.Split(content, "\n") {
 		switch markerDirective(line) {
 		case "+sew up":
@@ -303,8 +336,6 @@ func splitSections(content string) (up, down string) {
 	return ub.String(), db.String()
 }
 
-// markerDirective returns the normalized sew directive on a comment line, or "".
-// Recognizes "-- +sew up" / "-- +sew down" (any spacing, any case for up/down).
 func markerDirective(line string) string {
 	t := strings.TrimSpace(line)
 	if !strings.HasPrefix(t, "--") {

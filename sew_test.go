@@ -3,8 +3,39 @@ package sew
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 )
+
+// cellInt coerces a scanned count cell to int64 across backends.
+func cellInt(v any) int64 {
+	switch t := v.(type) {
+	case int64:
+		return t
+	case int:
+		return int64(t)
+	case []byte:
+		n, _ := strconv.ParseInt(string(t), 10, 64)
+		return n
+	case string:
+		n, _ := strconv.ParseInt(t, 10, 64)
+		return n
+	}
+	return 0
+}
+
+// queryCount runs a single-value count query over the DB's Conn.
+func queryCount(t *testing.T, d *DB, q string, args ...any) int64 {
+	t.Helper()
+	rows, err := d.conn.Query(q, args...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) == 0 || len(rows[0]) == 0 {
+		return 0
+	}
+	return cellInt(rows[0][0])
+}
 
 func writeFile(t *testing.T, dir, name, body string) {
 	t.Helper()
@@ -16,12 +47,7 @@ func writeFile(t *testing.T, dir, name, body string) {
 // tableExists reports whether a table is present (proves up/down actually ran).
 func tableExists(t *testing.T, d *DB, name string) bool {
 	t.Helper()
-	var n int
-	err := d.sql.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?`, name).Scan(&n)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return n > 0
+	return queryCount(t, d, `SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?`, name) > 0
 }
 
 func TestParseSections(t *testing.T) {
@@ -73,9 +99,8 @@ func TestUpIdempotentAndDown(t *testing.T) {
 		t.Fatal("tables not created")
 	}
 	// multi-statement migration ran fully (the INSERT too)
-	var count int
-	if err := db.sql.QueryRow(`SELECT count(*) FROM gadgets`).Scan(&count); err != nil || count != 1 {
-		t.Fatalf("multi-statement migration incomplete: count=%d err=%v", count, err)
+	if count := queryCount(t, db, `SELECT count(*) FROM gadgets`); count != 1 {
+		t.Fatalf("multi-statement migration incomplete: count=%d", count)
 	}
 
 	// Idempotent: second up applies nothing.
@@ -103,6 +128,42 @@ func TestUpIdempotentAndDown(t *testing.T) {
 	res3, _ := db.Up(migs, Options{})
 	if len(res3.Applied) != 1 || res3.Applied[0].Version != "002_gadgets" {
 		t.Fatalf("re-up applied %+v", res3.Applied)
+	}
+}
+
+// plainConn wraps a Conn but hides RunTx, so sew drives it best-effort — the path a
+// Pulp host-backed connection (no cross-call transactions) takes.
+type plainConn struct{ c Conn }
+
+func (p plainConn) Exec(q string, a ...any) error            { return p.c.Exec(q, a...) }
+func (p plainConn) Query(q string, a ...any) ([][]any, error) { return p.c.Query(q, a...) }
+
+// TestInjectedConnBestEffort proves migrations run over an injected Conn that is NOT a
+// TxConn — i.e. the driver-agnostic path a wasm cell uses.
+func TestInjectedConnBestEffort(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "001_x.sql", "-- +sew up\nCREATE TABLE x(id INTEGER);\nINSERT INTO x VALUES (7);\n")
+	migs, _ := Load(dir)
+
+	native, err := Open(filepath.Join(dir, "inj.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer native.Close()
+
+	// Re-wrap the same underlying conn as a plain (non-Tx) Conn and run through New.
+	injected, err := New(plainConn{c: native.conn})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := injected.conn.(TxConn); ok {
+		t.Fatal("plainConn must not satisfy TxConn (that's the whole point)")
+	}
+	if _, err := injected.Up(migs, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	if !tableExists(t, injected, "x") || queryCount(t, injected, `SELECT count(*) FROM x`) != 1 {
+		t.Fatal("best-effort injected Up did not apply the migration")
 	}
 }
 
