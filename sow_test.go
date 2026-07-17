@@ -135,7 +135,7 @@ func TestUpIdempotentAndDown(t *testing.T) {
 // Pulp host-backed connection (no cross-call transactions) takes.
 type plainConn struct{ c Conn }
 
-func (p plainConn) Exec(q string, a ...any) error            { return p.c.Exec(q, a...) }
+func (p plainConn) Exec(q string, a ...any) error             { return p.c.Exec(q, a...) }
 func (p plainConn) Query(q string, a ...any) ([][]any, error) { return p.c.Query(q, a...) }
 
 // TestInjectedConnBestEffort proves migrations run over an injected Conn that is NOT a
