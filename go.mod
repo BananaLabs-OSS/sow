@@ -1,4 +1,4 @@
-module github.com/SirNiklas9/sow
+module github.com/BananaLabs-OSS/sow
 
 go 1.25.0
 

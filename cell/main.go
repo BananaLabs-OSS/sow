@@ -16,7 +16,7 @@ import (
 	"embed"
 
 	"github.com/BananaLabs-OSS/Fiber/pulp"
-	"github.com/SirNiklas9/sow"
+	"github.com/BananaLabs-OSS/sow"
 )
 
 //go:embed migrations/*.sql

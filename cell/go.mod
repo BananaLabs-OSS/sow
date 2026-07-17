@@ -1,10 +1,10 @@
-module github.com/SirNiklas9/sow/cell
+module github.com/BananaLabs-OSS/sow/cell
 
 go 1.25.6
 
 require (
 	github.com/BananaLabs-OSS/Fiber v0.0.0
-	github.com/SirNiklas9/sow v0.0.0
+	github.com/BananaLabs-OSS/sow v0.0.0
 )
 
 require (
@@ -24,4 +24,4 @@ require (
 
 replace github.com/BananaLabs-OSS/Fiber => ../../Fiber
 
-replace github.com/SirNiklas9/sow => ../
+replace github.com/BananaLabs-OSS/sow => ../

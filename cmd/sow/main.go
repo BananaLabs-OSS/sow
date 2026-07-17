@@ -22,7 +22,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/SirNiklas9/sow"
+	"github.com/BananaLabs-OSS/sow"
 )
 
 func main() {
