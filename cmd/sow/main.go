@@ -1,10 +1,14 @@
-// Command sow is a general-purpose SQLite migration runner.
+// Command sow is a general-purpose SQLite and PostgreSQL migration runner.
 //
 //	sow up     <db> <dir> [--dry-run]     apply all pending migrations
 //	sow down   <db> <dir> [--steps N]     roll back the last N applied (default 1)
 //	sow status <db> <dir>                 show applied / pending
 //	sow create <dir> <name>               scaffold a new timestamped migration file
 //	sow version
+//
+// <db> is a SQLite path (or :memory:), a Postgres URL (postgres://…), or `-` to
+// read the DSN from $DATABASE_URL / $PGURL. Prefer the env form for Postgres: a
+// DSN carries a password, and an argument is visible to `ps` and shell history.
 //
 // A migration is a .sql file with `-- +sow up` / `-- +sow down` sections. The file name
 // (without .sql) is its version and sort key; use a zero-padded or timestamp prefix.
@@ -72,16 +76,52 @@ func loadTarget(args []string) (*sow.DB, []sow.Migration, []string) {
 	if len(args) < 2 {
 		die("need <db> <dir>")
 	}
-	dbPath, dir := args[0], args[1]
+	target, dir := args[0], args[1]
 	migs, err := sow.Load(dir)
 	if err != nil {
 		die("%v", err)
 	}
-	db, err := sow.Open(dbPath)
+	db, err := openTarget(target)
 	if err != nil {
+		// openTarget already redacts; still, never let a raw DSN reach here.
 		die("%v", err)
 	}
 	return db, migs, args[2:]
+}
+
+// openTarget routes to the right backend by the shape of the target string. A
+// Postgres URL (postgres:// or postgresql://) opens Postgres; anything else is
+// a SQLite path, exactly as before. `-` or an empty target means "read the DSN
+// from $DATABASE_URL / $PGURL" — the recommended form, because a DSN carries a
+// password and an argv is visible to `ps` and lands in shell history.
+func openTarget(target string) (*sow.DB, error) {
+	if target == "-" || target == "" {
+		dsn := firstEnv("DATABASE_URL", "PGURL")
+		if dsn == "" {
+			die("no DSN: set $DATABASE_URL or $PGURL (or pass a sqlite path)")
+		}
+		return sow.OpenPostgres(dsn)
+	}
+	if isPostgresDSN(target) {
+		return sow.OpenPostgres(target)
+	}
+	return sow.Open(target)
+}
+
+// isPostgresDSN recognizes the two standard URL schemes. A bare key=value DSN
+// (host=… user=…) is deliberately NOT auto-detected: it is ambiguous with a
+// filename and rare from a CLI. Use the env-var form for those.
+func isPostgresDSN(s string) bool {
+	return strings.HasPrefix(s, "postgres://") || strings.HasPrefix(s, "postgresql://")
+}
+
+func firstEnv(names ...string) string {
+	for _, n := range names {
+		if v := strings.TrimSpace(os.Getenv(n)); v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func cmdUp(args []string) {
@@ -186,7 +226,7 @@ func die(format string, a ...any) {
 }
 
 func usage() {
-	fmt.Print(`sow — a small SQLite migration runner
+	fmt.Print(`sow, a small SQLite and PostgreSQL migration runner
 
 Usage:
   sow up     <db> <dir> [--dry-run]     apply all pending migrations
@@ -194,6 +234,10 @@ Usage:
   sow status <db> <dir>                 show applied / pending
   sow create <dir> <name>               scaffold a new timestamped migration file
   sow version
+
+<db> is a SQLite path (or :memory:), a Postgres URL (postgres://...), or '-' to
+read the DSN from $DATABASE_URL or $PGURL. Prefer the env form for Postgres:
+a DSN carries a password, and an argument is visible to ps and shell history.
 
 A migration is a .sql file with two sections:
   -- +sow up
