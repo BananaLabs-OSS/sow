@@ -1,6 +1,9 @@
 package sow
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // The SQLite renderings below are byte-for-byte the literals sow shipped before dialects
 // existed. If one of these fails, an existing SQLite caller's behaviour just changed.
@@ -29,6 +32,18 @@ func TestPostgresDialectRendersOnConflictAndDollarPlaceholders(t *testing.T) {
 		if c.got != c.want {
 			t.Errorf("rendered\n  %s\nwant\n  %s", c.got, c.want)
 		}
+	}
+}
+
+// The Postgres ledger must use BIGINT, not INTEGER: applied_at is a millisecond
+// epoch that overflows int4 (a real failure hit against Crunchy Bridge). SQLite
+// keeps INTEGER because its INTEGER is already 64-bit.
+func TestPostgresLedgerUsesBigintForAppliedAt(t *testing.T) {
+	if !strings.Contains(Postgres().ledgerDDL, "applied_at BIGINT") {
+		t.Errorf("Postgres ledger DDL must declare applied_at BIGINT, got:\n%s", Postgres().ledgerDDL)
+	}
+	if strings.Contains(SQLite().ledgerDDL, "BIGINT") {
+		t.Errorf("SQLite ledger should keep INTEGER, not BIGINT:\n%s", SQLite().ledgerDDL)
 	}
 }
 

@@ -24,9 +24,9 @@ import "strconv"
 type Dialect struct {
 	name string // "sqlite" | "postgres" — identity, for errors and tests
 
-	// ledgerDDL creates sow_migrations. Both shipped dialects use the same portable DDL
-	// today; this is the seam a third dialect would vary (e.g. one with no TEXT PRIMARY
-	// KEY) without the runner learning about it.
+	// ledgerDDL creates sow_migrations. SQLite and Postgres differ here: applied_at
+	// is a millisecond epoch that overflows Postgres INTEGER (int4), so Postgres uses
+	// BIGINT. This is the seam a third dialect varies without the runner learning about it.
 	ledgerDDL string
 
 	// insertVerb opens an insert that must not fail when the version is already recorded,
@@ -58,7 +58,7 @@ var sqliteDialect = Dialect{
 
 var postgresDialect = Dialect{
 	name:        "postgres",
-	ledgerDDL:   ledgerDDL,
+	ledgerDDL:   postgresLedgerDDL,
 	insertVerb:  "INSERT INTO",
 	onConflict:  " ON CONFLICT (version) DO NOTHING",
 	placeholder: func(n int) string { return "$" + strconv.Itoa(n) },

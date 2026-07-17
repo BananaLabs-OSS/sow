@@ -55,10 +55,22 @@ type Migration struct {
 }
 
 // ledgerDDL records which versions have been applied. Created on first use.
+//
+// applied_at holds Options.Now()'s value, a millisecond epoch (~1.78e12). That
+// overflows Postgres INTEGER (int4, max ~2.1e9), so the Postgres dialect uses
+// BIGINT. SQLite INTEGER is already 64-bit, so it keeps the portable form.
 const ledgerDDL = `CREATE TABLE IF NOT EXISTS sow_migrations (
 	version    TEXT PRIMARY KEY,
 	name       TEXT NOT NULL DEFAULT '',
 	applied_at INTEGER NOT NULL DEFAULT 0
+)`
+
+// postgresLedgerDDL is ledgerDDL with a 64-bit applied_at. Postgres INTEGER is
+// only 32 bits and cannot hold a millisecond epoch.
+const postgresLedgerDDL = `CREATE TABLE IF NOT EXISTS sow_migrations (
+	version    TEXT PRIMARY KEY,
+	name       TEXT NOT NULL DEFAULT '',
+	applied_at BIGINT NOT NULL DEFAULT 0
 )`
 
 // Options tune an Up/Down run.
