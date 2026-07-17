@@ -21,7 +21,7 @@ func Open(path string) (*DB, error) {
 		return nil, fmt.Errorf("sow: open %q: %w", path, err)
 	}
 	db.SetMaxOpenConns(1) // one connection keeps :memory: coherent and cross-call tx valid
-	d, err := New(&sqliteConn{db: db})
+	d, err := New(&sqlConn{db: db})
 	if err != nil {
 		_ = db.Close()
 		return nil, err
@@ -29,15 +29,16 @@ func Open(path string) (*DB, error) {
 	return d, nil
 }
 
-// sqliteConn is a native database/sql connection satisfying Conn, TxConn, and io.Closer.
-type sqliteConn struct{ db *sql.DB }
+// sqlConn is a database/sql-backed Conn satisfying Conn, TxConn, and io.Closer. It is
+// driver-agnostic — open_native.go points it at modernc SQLite, open_postgres.go at pgx.
+type sqlConn struct{ db *sql.DB }
 
-func (c *sqliteConn) Exec(query string, args ...any) error {
+func (c *sqlConn) Exec(query string, args ...any) error {
 	_, err := c.db.Exec(query, args...)
 	return err
 }
 
-func (c *sqliteConn) Query(query string, args ...any) ([][]any, error) {
+func (c *sqlConn) Query(query string, args ...any) ([][]any, error) {
 	rows, err := c.db.Query(query, args...)
 	if err != nil {
 		return nil, err
@@ -46,10 +47,10 @@ func (c *sqliteConn) Query(query string, args ...any) ([][]any, error) {
 	return scanRows(rows)
 }
 
-func (c *sqliteConn) Close() error { return c.db.Close() }
+func (c *sqlConn) Close() error { return c.db.Close() }
 
 // RunTx runs fn inside a transaction, committing on success and rolling back on error.
-func (c *sqliteConn) RunTx(fn func(Conn) error) error {
+func (c *sqlConn) RunTx(fn func(Conn) error) error {
 	tx, err := c.db.Begin()
 	if err != nil {
 		return err

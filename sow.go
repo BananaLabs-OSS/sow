@@ -1,8 +1,8 @@
-// Package sow is a small, general-purpose SQLite migration runner: point it at any
-// SQLite database and a directory of `.sql` migration files, and it applies the
-// pending ones in order, once, recording what it applied so re-running is a no-op.
-// Rollbacks run each migration's `down` section. No ORM, no codegen, no framework —
-// read migrations, apply them, sow it up.
+// Package sow is a small, general-purpose SQL migration runner: point it at a SQLite or
+// Postgres database and a directory of `.sql` migration files, and it applies the pending
+// ones in order, once, recording what it applied so re-running is a no-op. Rollbacks run
+// each migration's `down` section. No ORM, no codegen, no framework — read migrations,
+// apply them, sow it up.
 //
 // The core owns NO SQLite driver: it runs over an injected Conn (see Conn/TxConn), so it
 // compiles to wasm and can run as a Pulp cell that gets SQLite from the host capability,
@@ -87,17 +87,30 @@ type Result struct {
 	Rolled  []Migration // migrations whose Down ran
 }
 
-// DB is a migration target: any Conn with the sow ledger ensured.
-type DB struct{ conn Conn }
+// DB is a migration target: any Conn with the sow ledger ensured, speaking one Dialect.
+type DB struct {
+	conn Conn
+	dia  Dialect
+}
 
 // New wraps an injected Conn (native, host-backed, or a test fake) and ensures the ledger
-// table exists. This is the driver-agnostic constructor; Open is the native convenience.
-func New(conn Conn) (*DB, error) {
-	if err := conn.Exec(ledgerDDL); err != nil {
+// table exists, speaking SQLite. This is the driver-agnostic constructor; Open is the native
+// convenience. Use NewWithDialect to inject a Conn that talks to something else.
+func New(conn Conn) (*DB, error) { return NewWithDialect(conn, SQLite()) }
+
+// NewWithDialect is New over a caller-chosen Dialect — the seam for an injected Conn that is
+// not SQLite (a Pulp cell whose host capability is Postgres, say). The zero Dialect means
+// SQLite, so NewWithDialect(conn, Dialect{}) is exactly New(conn).
+func NewWithDialect(conn Conn, d Dialect) (*DB, error) {
+	d = d.resolve()
+	if err := conn.Exec(d.ledgerDDL); err != nil {
 		return nil, fmt.Errorf("sow: init ledger: %w", err)
 	}
-	return &DB{conn: conn}, nil
+	return &DB{conn: conn, dia: d}, nil
 }
+
+// Dialect reports the SQL flavour this DB speaks.
+func (d *DB) Dialect() Dialect { return d.dia }
 
 // Close closes the underlying Conn if it is a Closer (the native adapter is); a
 // host-backed Conn the caller owns is left untouched.
@@ -120,9 +133,7 @@ func (d *DB) atomically(fn func(Conn) error) error {
 // uses to adopt sow over a database migrated by an older mechanism (seed the ledger from a
 // prior version counter so those steps don't re-run). Idempotent.
 func (d *DB) MarkApplied(version, name string, at int64) error {
-	return d.conn.Exec(
-		`INSERT OR IGNORE INTO sow_migrations (version, name, applied_at) VALUES (?, ?, ?)`,
-		version, name, at)
+	return d.conn.Exec(d.dia.upsertLedgerSQL(), version, name, at)
 }
 
 // AppliedVersions returns the applied versions in application order.
@@ -204,8 +215,7 @@ func (d *DB) Up(ms []Migration, opt Options) (Result, error) {
 			if err := execAll(c, m.Up); err != nil {
 				return err
 			}
-			return c.Exec(`INSERT INTO sow_migrations (version, name, applied_at) VALUES (?, ?, ?)`,
-				m.Version, m.Name, opt.now())
+			return c.Exec(d.dia.insertLedgerSQL(), m.Version, m.Name, opt.now())
 		}); err != nil {
 			return res, fmt.Errorf("sow: up %s (%s): %w", m.Version, m.Path, err)
 		}
@@ -247,7 +257,7 @@ func (d *DB) Down(ms []Migration, n int, opt Options) (Result, error) {
 			if err := execAll(c, m.Down); err != nil {
 				return err
 			}
-			return c.Exec(`DELETE FROM sow_migrations WHERE version = ?`, v)
+			return c.Exec(d.dia.deleteLedgerSQL(), v)
 		}); err != nil {
 			return res, fmt.Errorf("sow: down %s (%s): %w", m.Version, m.Path, err)
 		}
