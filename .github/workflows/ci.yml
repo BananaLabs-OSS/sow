@@ -11,10 +11,10 @@ permissions:
 
 jobs:
   root:
-    uses: BananaLabs-OSS/.github/.github/workflows/go-ci.yml@a4b55e64f0ce6de94eddb45f13a57b3458f6f9bb
+    uses: BananaLabs-OSS/.github/.github/workflows/go-ci.yml@bdc81a8a0f751c60140d9d1505c56853475cc85f
 
   cell:
-    uses: BananaLabs-OSS/.github/.github/workflows/go-ci.yml@a4b55e64f0ce6de94eddb45f13a57b3458f6f9bb
+    uses: BananaLabs-OSS/.github/.github/workflows/go-ci.yml@bdc81a8a0f751c60140d9d1505c56853475cc85f
     with:
       working-directory: cell
       sibling-repositories: BananaLabs-OSS/Fiber
