@@ -1,0 +1,20 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  root:
+    uses: BananaLabs-OSS/.github/.github/workflows/go-ci.yml@03801df76fc2698d80f3f83f44db6445de0506d2
+
+  cell:
+    uses: BananaLabs-OSS/.github/.github/workflows/go-ci.yml@03801df76fc2698d80f3f83f44db6445de0506d2
+    with:
+      working-directory: cell
+      sibling-repositories: BananaLabs-OSS/Fiber
